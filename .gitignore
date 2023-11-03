@@ -1,5 +1,8 @@
 # Compiled Lua sources
 luac.out
+luacov.report.out
+luacov.stats.out
+t/servroot
 
 # luarocks build files
 *.src.rock
