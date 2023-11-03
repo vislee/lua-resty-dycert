@@ -8,7 +8,9 @@ local ffi_new = ffi.new
 local ffi_gc = ffi.gc
 local ffi_cast = ffi.cast
 local ffi_str = ffi.string
+local ffi_sizeof = ffi.sizeof
 local str_fmt = string.format
+local tab_concat = table.concat
 
 local c_uchar_type = ffi.typeof("unsigned char[?]")
 
@@ -35,6 +37,8 @@ ffi.cdef[[
     typedef struct evp_md_st EVP_MD;
     typedef struct evp_cipher_st EVP_CIPHER;
 
+    unsigned long ERR_peek_last_error(void);
+    void ERR_error_string_n(unsigned long e, char *buf, size_t len);
     void ERR_clear_error(void);
 
     BIO *BIO_new(const BIO_METHOD *type);
@@ -90,18 +94,25 @@ ffi.cdef[[
 ]]
 
 
+local errbuf = ffi.new('char[256]')
+local function err_fmt(msg)
+    local code = C.ERR_peek_last_error()
+    C.ERR_error_string_n(code, errbuf, ffi_sizeof(errbuf))
+    C.ERR_clear_error()
+    return tab_concat({msg, ffi_str(errbuf)}, ", ")
+end
+
+
 function _M.str_to_x509(crt)
     local bio = C.BIO_new_mem_buf(crt, #crt)
     if bio == nil then
-        C.ERR_clear_error()
-        return nil, "BIO_new_mem_buf return nil"
+        return nil, err_fmt("BIO_new_mem_buf return nil")
     end
 
     local crt = C.PEM_read_bio_X509(bio, nil, nil, nil)
     if crt == nil then
         C.BIO_free(bio)
-        C.ERR_clear_error()
-        return nil, "PEM_read_bio_X509 error"
+        return nil, err_fmt("PEM_read_bio_X509 error")
     end
 
     C.BIO_free(bio)
@@ -114,15 +125,13 @@ end
 function _M.str_to_pkey(key)
     local bio = C.BIO_new_mem_buf(key, #key)
     if bio == nil then
-        C.ERR_clear_error()
-        return nil, "BIO_new_mem_buf return nil"
+        return nil, err_fmt("BIO_new_mem_buf return nil")
     end
 
     local key = C.PEM_read_bio_PrivateKey(bio, nil, nil, nil)
     if key == nil then
         C.BIO_free(bio)
-        C.ERR_clear_error()
-        return nil, "PEM_read_bio_PrivateKey error"
+        return nil, err_fmt("PEM_read_bio_PrivateKey error")
     end
 
     C.BIO_free(bio)
@@ -135,15 +144,13 @@ end
 function _M.str_to_x509req(csr)
     local bio = C.BIO_new_mem_buf(csr, #csr)
     if bio == nil then
-        C.ERR_clear_error()
-        return nil, "BIO_new_mem_buf return nil"
+        return nil, err_fmt("BIO_new_mem_buf return nil")
     end
 
     local csr = C.PEM_read_bio_X509_REQ(bio, nil, nil, nil);
     if csr == nil then
         C.BIO_free(bio)
-        C.ERR_clear_error()
-        return nil, "PEM_read_bio_X509_REQ error"
+        return nil, err_fmt("PEM_read_bio_X509_REQ error")
     end
 
     C.BIO_free(bio)
@@ -156,17 +163,17 @@ end
 local function wrap_to_x(tox, ...)
     local bio = C.BIO_new(C.BIO_s_mem())
     if bio == nil then
-        return nil, "BIO_new return nil"
+        return nil, err_fmt("BIO_new return nil")
     end
 
     local r = C.BIO_ctrl(bio, BIO_CTRL_RESET, 0, nil)
     if r ~= 1 then
-        return nil, "BIO_ctrl return " .. r
+        return nil, err_fmt("BIO_ctrl return " .. r)
     end
 
     local r = tox(bio, ...)
     if r ~= 1 then
-        return nil, "i2d_X509_bio return " .. r
+        return nil, err_fmt("i2d_X509_bio return " .. r)
     end
 
     local buf = ffi_new("char *[1]")
@@ -199,8 +206,7 @@ local function set_serial_number(crt)
     local buf = c_uchar_type(20)
     local res = C.RAND_bytes(buf, 20)
     if res ~= 1 then
-        C.ERR_clear_error()
-        return nil, str_fmt("RAND_bytes return %d", res)
+        return nil, err_fmt(str_fmt("RAND_bytes return %d", res))
     end
 
     local ptr = ffi_cast("char*", buf)
@@ -208,8 +214,7 @@ local function set_serial_number(crt)
 
     local bn = C.BN_bin2bn(buf, 20, nil)
     if bn == nil then
-        C.ERR_clear_error()
-        return nil, "BN_bin2bn return nil"
+        return nil, err_fmt("BN_bin2bn return nil")
     end
     ffi_gc(bn, C.BN_free)
 
@@ -217,8 +222,7 @@ local function set_serial_number(crt)
     ffi_gc(ser, C.ASN1_INTEGER_free)
 
     if C.X509_set_serialNumber(crt, ser) == 0 then
-        C.ERR_clear_error()
-        return nil, "X509_set_serialNumber return error"
+        return nil, err_fmt("X509_set_serialNumber return error")
     end
 
     return true
@@ -228,8 +232,7 @@ end
 function _M.gen_signed_cert(csr, ca_key, ca_crt, cn)
     local crt = C.X509_new()
     if crt == nil then
-        C.ERR_clear_error()
-        return nil, "X509_new return nil"
+        return nil, err_fmt("X509_new return nil")
     end
     ffi_gc(crt, C.X509_free)
 
@@ -237,8 +240,7 @@ function _M.gen_signed_cert(csr, ca_key, ca_crt, cn)
 
     set_serial_number(crt)
     if C.X509_set_issuer_name(crt, C.X509_get_subject_name(ca_crt)) == 0 then
-        C.ERR_clear_error()
-        return nil, "X509_set_issuer_name error"
+        return nil, err_fmt("X509_set_issuer_name error")
     end
 
     C.X509_gmtime_adj(C.X509_getm_notBefore(crt), 0);
@@ -246,8 +248,7 @@ function _M.gen_signed_cert(csr, ca_key, ca_crt, cn)
 
     local name = C.X509_REQ_get_subject_name(csr);
     if name == nil then
-        C.ERR_clear_error()
-        return nil, "X509_REQ_get_subject_name return nil"
+        return nil, err_fmt("X509_REQ_get_subject_name return nil")
     end
 
     local cn_index = C.X509_NAME_get_index_by_NID(name, NID_commonName, -1);
@@ -257,22 +258,19 @@ function _M.gen_signed_cert(csr, ca_key, ca_crt, cn)
     C.X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, cn, -1, -1, 0)
 
     if C.X509_set_subject_name(crt, name) == 0 then
-        C.ERR_clear_error()
-        return nil, "X509_set_subject_name return error"
+        return nil, err_fmt("X509_set_subject_name return error")
     end
 
     local pub = C.X509_REQ_get_pubkey(csr)
     if pub == nil then
-        C.ERR_clear_error()
-        return nil, "X509_REQ_get_pubkey return nil"
+        return nil, err_fmt("X509_REQ_get_pubkey return nil")
     end
 
     C.X509_set_pubkey(crt, pub)
     C.EVP_PKEY_free(pub)
 
     if C.X509_sign(crt, ca_key, C.EVP_sha256()) == 0 then
-        C.ERR_clear_error()
-        return nil, "X509_sign return error"
+        return nil, err_fmt("X509_sign return error")
     end
 
     return crt
