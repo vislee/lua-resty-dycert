@@ -1,7 +1,8 @@
 -- Copyright (C) vislee
-local ssl = require("resty.dycert.openssl")
+local dyssl = require("resty.dycert.openssl")
 
 local open = io.open
+local rawset = rawset
 local setmetatable = setmetatable
 
 
@@ -10,60 +11,69 @@ local mt = { __index = _M }
 
 
 function _M.new(ca_key_path, ca_crt_path, key_path, csr_path)
-    local ca_key_fd, err = open(ca_key_path, "r")
+    return setmetatable({
+        ca_key_path = ca_key_path,
+        ca_crt_path = ca_crt_path,
+        key_path = key_path,
+        csr_path = csr_path
+    }, mt)
+end
+
+function _M.init(self)
+    local ca_key_fd, err = open(self.ca_key_path, "r")
     if err ~= nil then
-        return nil, err
+        return err
     end
-    local ca_key = ca_key_fd:read("*all")
+    local ca_key = ca_key_fd:read("*a")
     ca_key_fd:close()
 
-    local ca_crt_fd, err = open(ca_crt_path, "r")
+    local ca_crt_fd, err = open(self.ca_crt_path, "r")
     if err ~= nil then
-        return nil, err
+        return err
     end
-    local ca_crt = ca_crt_fd:read("*all")
+    local ca_crt = ca_crt_fd:read("*a")
     ca_crt_fd:close()
 
-    local key_fd, err = open(key_path, "r")
+    local key_fd, err = open(self.key_path, "r")
     if err ~= nil then
-        return nil, err
+        return err
     end
-    local key = key_fd:read("*all")
+    local key = key_fd:read("*a")
     key_fd:close()
 
-    local csr_fd, err = open(csr_path, "r")
+    local csr_fd, err = open(self.csr_path, "r")
     if err ~= nil then
-        return nil, err
+        return err
     end
-    local csr = csr_fd:read("*all")
+    local csr = csr_fd:read("*a")
     csr_fd:close()
 
-    local ca_pkey, err = ssl.str_to_pkey(ca_key)
+    local ca_pkey, err = dyssl.str_to_pkey(ca_key)
     if err ~= nil then
-        return nil, err
+        return err
     end
 
-    local ca_x509, err = ssl.str_to_x509(ca_crt)
+    local ca_x509, err = dyssl.str_to_x509(ca_crt)
     if err ~= nil then
-        return nil, err
+        return err
     end
 
-    local pkey, err = ssl.str_to_pkey(key)
+    local pkey, err = dyssl.str_to_pkey(key)
     if err ~= nil then
-        return nil, err
+        return err
     end
 
-    local xreq, err = ssl.str_to_x509req(csr)
+    local xreq, err = dyssl.str_to_x509req(csr)
     if err ~= nil then
-        return nil, err
+        return err
     end
 
-    return setmetatable({
-        ca_pkey = ca_pkey,
-        ca_x509 = ca_x509,
-        pkey = pkey,
-        xreq = xreq
-    }, mt)
+    rawset(self, "ca_pkey", ca_pkey)
+    rawset(self, "ca_x509", ca_x509)
+    rawset(self, "pkey", pkey)
+    rawset(self, "xreq", xreq)
+
+    return nil
 end
 
 
@@ -72,23 +82,31 @@ function _M.get_cert(self, fmt, cn)
         return nil, "Invalid cn"
     end
 
-    local x509, err = ssl.gen_signed_cert(self.xreq, self.ca_pkey, self.ca_x509, cn)
+    if self.ca_pkey == nil or self.ca_x509 == nil or self.xreq == nil then
+        return nil, "init failure"
+    end
+
+    local x509, err = dyssl.gen_signed_cert(self.xreq, self.ca_pkey, self.ca_x509, cn)
     if err ~= nil then
         return nil, err
     end
 
     if fmt == "DER" then
-        return ssl.x509_to_der(x509)
+        return dyssl.x509_to_der(x509)
     end
-    return ssl.x509_to_pem(x509)
+    return dyssl.x509_to_pem(x509)
 end
 
 
 function _M.get_pkey(self, fmt)
-    if fmt == "DER" then
-        return ssl.pkey_to_der(self.pkey)
+    if self.pkey == nil then
+        return nil, "init failure"
     end
-    return ssl.pkey_to_pem(self.pkey)
+
+    if fmt == "DER" then
+        return dyssl.pkey_to_der(self.pkey)
+    end
+    return dyssl.pkey_to_pem(self.pkey)
 end
 
 

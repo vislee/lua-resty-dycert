@@ -20,10 +20,10 @@ __DATA__
     init_by_lua_block {
         require 'luacov.tick'
         jit.off()
-        local err
-        dycert, err = require("resty.dycert"). new("t/cert/ca.key", "t/cert/ca.crt", "t/cert/test.key", "t/cert/test.csr")
+        dycert = require("resty.dycert").new("t/cert/ca.key", "t/cert/ca.crt", "t/cert/test.key", "t/cert/test.csr")
+        local err = dycert:init()
         if err ~= nil then
-            ngx.log(ngx.ERR, "dycert.new error.", err)
+            ngx.log(ngx.ERR, "dycert init error ", err)
         end
     }
 
