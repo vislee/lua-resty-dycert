@@ -1,0 +1,282 @@
+-- Copyright (C) vislee
+
+
+local bit = require "bit"
+local ffi = require "ffi"
+local C = ffi.C
+local ffi_new = ffi.new
+local ffi_gc = ffi.gc
+local ffi_cast = ffi.cast
+local ffi_str = ffi.string
+local str_fmt = string.format
+
+local c_uchar_type = ffi.typeof("unsigned char[?]")
+
+local NID_commonName = 13
+local MBSTRING_ASC   = 0x1001
+local BIO_CTRL_RESET = 1
+local BIO_CTRL_INFO  = 3
+
+local _M = {}
+
+
+ffi.cdef[[
+    typedef long time_t;
+    typedef struct bio_st BIO;
+    typedef struct bio_method_st BIO_METHOD;
+    typedef struct x509_st X509;
+    typedef struct evp_pkey_st EVP_PKEY;
+    typedef struct X509_req_st X509_REQ;
+    typedef struct bignum_st BIGNUM;
+    typedef struct asn1_string_st ASN1_INTEGER;
+    typedef struct X509_name_st X509_NAME;
+    typedef struct asn1_string_st ASN1_TIME;
+    typedef struct X509_name_entry_st X509_NAME_ENTRY;
+    typedef struct evp_md_st EVP_MD;
+    typedef struct evp_cipher_st EVP_CIPHER;
+
+    void ERR_clear_error(void);
+
+    BIO *BIO_new(const BIO_METHOD *type);
+    BIO *BIO_new_mem_buf(const void *buf, int len);
+    long BIO_ctrl(BIO *bp, int cmd, long larg, void *parg);
+    int BIO_free(BIO *a);
+    int i2d_X509_REQ_bio(BIO *bp, X509_REQ *req);
+    int i2d_X509_bio(BIO *bp, X509 *x509);
+    int i2d_PrivateKey_bio(BIO *bp, const EVP_PKEY *pkey);
+    const BIO_METHOD *BIO_s_mem(void);
+
+    typedef int (*pem_password_cb)(char *buf, int size, int rwflag, void *userdata);
+    X509 *PEM_read_bio_X509(BIO *bp, X509 **x, pem_password_cb *cb, void *u);
+    int PEM_write_bio_X509(BIO *bp, X509 *x);
+    EVP_PKEY *PEM_read_bio_PrivateKey(BIO *bp, EVP_PKEY **x,
+                                              pem_password_cb *cb, void *u);
+    int PEM_write_bio_PrivateKey(BIO *bp, const EVP_PKEY *x, const EVP_CIPHER *enc,
+                                     unsigned char *kstr, int klen,
+                                     pem_password_cb *cb, void *u);
+    X509_REQ *PEM_read_bio_X509_REQ(BIO *bp, X509_REQ **x,
+                                            pem_password_cb *cb, void *u);
+    X509 *X509_new(void);
+    void X509_free(X509 *a);
+    int X509_set_version(X509 *x, long version);
+    void EVP_PKEY_free(EVP_PKEY *key);
+    void X509_REQ_free(X509_REQ *a);
+    int X509_set_serialNumber(X509 *x, ASN1_INTEGER *serial);
+    int X509_set_subject_name(X509 *x, X509_NAME *name);
+
+    int RAND_bytes(unsigned char *buf, int num);
+    BIGNUM *BN_bin2bn(const unsigned char *s, int len, BIGNUM *ret);
+    void BN_free(BIGNUM *a);
+    ASN1_INTEGER *BN_to_ASN1_INTEGER(const BIGNUM *bn, ASN1_INTEGER *ai);
+    void ASN1_INTEGER_free(ASN1_INTEGER *a);
+
+    X509_NAME *X509_get_subject_name(const X509 *x);
+    int X509_set_issuer_name(X509 *x, const X509_NAME *name);
+
+    ASN1_TIME *X509_getm_notBefore(const X509 *x);
+    ASN1_TIME *X509_getm_notAfter(const X509 *x);
+    ASN1_TIME *X509_gmtime_adj(ASN1_TIME *asn1_time, long offset_sec);
+    ASN1_TIME *ASN1_TIME_set(ASN1_TIME *s, time_t t);
+
+    X509_NAME *X509_REQ_get_subject_name(const X509_REQ *req);
+    int X509_NAME_get_index_by_NID(const X509_NAME *name, int nid, int lastpos);
+    X509_NAME_ENTRY *X509_NAME_delete_entry(X509_NAME *name, int loc);
+    int X509_NAME_add_entry_by_txt(X509_NAME *name, const char *field, int type,
+                                           const unsigned char *bytes, int len, int loc, int set);
+    EVP_PKEY *X509_REQ_get_pubkey(X509_REQ *req);
+    int X509_set_pubkey(X509 *x, EVP_PKEY *pkey);
+    const EVP_MD *EVP_sha256(void);
+    int X509_sign(X509 *x, EVP_PKEY *pkey, const EVP_MD *md);
+]]
+
+
+function _M.str_to_x509(crt)
+    local bio = C.BIO_new_mem_buf(crt, #crt)
+    if bio == nil then
+        C.ERR_clear_error()
+        return nil, "BIO_new_mem_buf return nil"
+    end
+
+    local crt = C.PEM_read_bio_X509(bio, nil, nil, nil)
+    if crt == nil then
+        C.BIO_free(bio)
+        C.ERR_clear_error()
+        return nil, "PEM_read_bio_X509 error"
+    end
+
+    C.BIO_free(bio)
+    ffi_gc(crt, C.X509_free)
+
+    return crt
+end
+
+
+function _M.str_to_pkey(key)
+    local bio = C.BIO_new_mem_buf(key, #key)
+    if bio == nil then
+        C.ERR_clear_error()
+        return nil, "BIO_new_mem_buf return nil"
+    end
+
+    local key = C.PEM_read_bio_PrivateKey(bio, nil, nil, nil)
+    if key == nil then
+        C.BIO_free(bio)
+        C.ERR_clear_error()
+        return nil, "PEM_read_bio_PrivateKey error"
+    end
+
+    C.BIO_free(bio)
+    ffi_gc(key, C.EVP_PKEY_free)
+
+    return key
+end
+
+
+function _M.str_to_x509req(csr)
+    local bio = C.BIO_new_mem_buf(csr, #csr)
+    if bio == nil then
+        C.ERR_clear_error()
+        return nil, "BIO_new_mem_buf return nil"
+    end
+
+    local csr = C.PEM_read_bio_X509_REQ(bio, nil, nil, nil);
+    if csr == nil then
+        C.BIO_free(bio)
+        C.ERR_clear_error()
+        return nil, "PEM_read_bio_X509_REQ error"
+    end
+
+    C.BIO_free(bio)
+    ffi_gc(csr, C.X509_REQ_free)
+
+    return csr
+end
+
+
+local function wrap_to_x(tox, ...)
+    local bio = C.BIO_new(C.BIO_s_mem())
+    if bio == nil then
+        return nil, "BIO_new return nil"
+    end
+
+    local r = C.BIO_ctrl(bio, BIO_CTRL_RESET, 0, nil)
+    if r ~= 1 then
+        return nil, "BIO_ctrl return " .. r
+    end
+
+    local r = tox(bio, ...)
+    if r ~= 1 then
+        return nil, "i2d_X509_bio return " .. r
+    end
+
+    local buf = ffi_new("char *[1]")
+    local len = C.BIO_ctrl(bio, BIO_CTRL_INFO, 0, buf)
+    return ffi_str(buf[0], len)
+end
+
+
+function _M.x509_to_pem(x509)
+    return wrap_to_x(C.PEM_write_bio_X509, x509)
+end
+
+
+function _M.x509_to_der(x509)
+    return wrap_to_x(C.i2d_X509_bio, x509)
+end
+
+
+function _M.pkey_to_pem(pkey)
+    return wrap_to_x(C.PEM_write_bio_PrivateKey, pkey, nil, nil, 0, nil, nil)
+end
+
+
+function _M.pkey_to_der(pkey)
+    return wrap_to_x(C.i2d_PrivateKey_bio, pkey)
+end
+
+
+local function set_serial_number(crt)
+    local buf = c_uchar_type(20)
+    local res = C.RAND_bytes(buf, 20)
+    if res ~= 1 then
+        C.ERR_clear_error()
+        return nil, str_fmt("RAND_bytes return %d", res)
+    end
+
+    local ptr = ffi_cast("char*", buf)
+    ptr[0] = bit.band(ptr[0], 0x7f)
+
+    local bn = C.BN_bin2bn(buf, 20, nil)
+    if bn == nil then
+        C.ERR_clear_error()
+        return nil, "BN_bin2bn return nil"
+    end
+    ffi_gc(bn, C.BN_free)
+
+    local ser = C.BN_to_ASN1_INTEGER(bn, nil)
+    ffi_gc(ser, C.ASN1_INTEGER_free)
+
+    if C.X509_set_serialNumber(crt, ser) == 0 then
+        C.ERR_clear_error()
+        return nil, "X509_set_serialNumber return error"
+    end
+
+    return true
+end
+
+
+function _M.gen_signed_cert(csr, ca_key, ca_crt, cn)
+    local crt = C.X509_new()
+    if crt == nil then
+        C.ERR_clear_error()
+        return nil, "X509_new return nil"
+    end
+    ffi_gc(crt, C.X509_free)
+
+    C.X509_set_version(crt, 0x02)
+
+    set_serial_number(crt)
+    if C.X509_set_issuer_name(crt, C.X509_get_subject_name(ca_crt)) == 0 then
+        C.ERR_clear_error()
+        return nil, "X509_set_issuer_name error"
+    end
+
+    C.X509_gmtime_adj(C.X509_getm_notBefore(crt), 0);
+    C.X509_gmtime_adj(C.X509_getm_notAfter(crt), 30*24*3600);
+
+    local name = C.X509_REQ_get_subject_name(csr);
+    if name == nil then
+        C.ERR_clear_error()
+        return nil, "X509_REQ_get_subject_name return nil"
+    end
+
+    local cn_index = C.X509_NAME_get_index_by_NID(name, NID_commonName, -1);
+    if cn_index >= 0 then
+        C.X509_NAME_delete_entry(name, cn_index);
+    end
+    C.X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, cn, -1, -1, 0)
+
+    if C.X509_set_subject_name(crt, name) == 0 then
+        C.ERR_clear_error()
+        return nil, "X509_set_subject_name return error"
+    end
+
+    local pub = C.X509_REQ_get_pubkey(csr)
+    if pub == nil then
+        C.ERR_clear_error()
+        return nil, "X509_REQ_get_pubkey return nil"
+    end
+
+    C.X509_set_pubkey(crt, pub)
+    C.EVP_PKEY_free(pub)
+
+    if C.X509_sign(crt, ca_key, C.EVP_sha256()) == 0 then
+        C.ERR_clear_error()
+        return nil, "X509_sign return error"
+    end
+
+    return crt
+end
+
+
+return _M
