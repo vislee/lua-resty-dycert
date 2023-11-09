@@ -8,8 +8,8 @@ Table of Contents
 * [Methods](#methods)
     * [new](#new)
     * [init](#init)
-    * [get](#get)
-    * [free](#free)
+    * [get_cert](#get_cert)
+    * [get_pkey](#get_pkey)
 * [Author](#author)
 * [Copyright and License](#copyright-and-license)
 
