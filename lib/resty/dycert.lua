@@ -19,6 +19,7 @@ function _M.new(ca_key_path, ca_crt_path, key_path, csr_path)
     }, mt)
 end
 
+
 function _M.init(self)
     local ca_key_fd, err = open(self.ca_key_path, "r")
     if err ~= nil then
@@ -77,16 +78,16 @@ function _M.init(self)
 end
 
 
-function _M.get_cert(self, fmt, cn)
-    if cn == nil or cn == "" then
-        return nil, "Invalid cn"
+function _M.get_cert(self, fmt, exts)
+    if type(exts) ~= "table" then
+        return nil, "Invalid exts"
     end
 
     if self.ca_pkey == nil or self.ca_x509 == nil or self.xreq == nil then
-        return nil, "init failure"
+        return nil, "Failed init"
     end
 
-    local x509, err = dyssl.gen_signed_cert(self.xreq, self.ca_pkey, self.ca_x509, cn)
+    local x509, err = dyssl.gen_signed_cert(self.xreq, self.ca_pkey, self.ca_x509, exts)
     if err ~= nil then
         return nil, err
     end
@@ -100,7 +101,7 @@ end
 
 function _M.get_pkey(self, fmt)
     if self.pkey == nil then
-        return nil, "init failure"
+        return nil, "Failed init"
     end
 
     if fmt == "DER" then

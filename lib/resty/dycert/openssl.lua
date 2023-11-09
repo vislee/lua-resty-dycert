@@ -15,9 +15,12 @@ local tab_concat = table.concat
 local c_uchar_type = ffi.typeof("unsigned char[?]")
 
 local NID_commonName = 13
+local NID_countryName = 14
+local NID_stateOrProvinceName = 16
 local MBSTRING_ASC   = 0x1001
 local BIO_CTRL_RESET = 1
 local BIO_CTRL_INFO  = 3
+local NID_subject_alt_name = 85
 
 local _M = {}
 
@@ -31,11 +34,16 @@ ffi.cdef[[
     typedef struct X509_req_st X509_REQ;
     typedef struct bignum_st BIGNUM;
     typedef struct asn1_string_st ASN1_INTEGER;
-    typedef struct X509_name_st X509_NAME;
     typedef struct asn1_string_st ASN1_TIME;
+    typedef struct X509_name_st X509_NAME;
     typedef struct X509_name_entry_st X509_NAME_ENTRY;
     typedef struct evp_md_st EVP_MD;
     typedef struct evp_cipher_st EVP_CIPHER;
+    typedef struct stack_st OPENSSL_STACK;
+    typedef struct general_name_st GENERAL_NAME;
+    typedef struct asn1_object_st ASN1_OBJECT;
+    typedef struct asn1_string_st ASN1_IA5STRING;
+    typedef struct asn1_string_st ASN1_STRING;
 
     unsigned long ERR_peek_last_error(void);
     void ERR_error_string_n(unsigned long e, char *buf, size_t len);
@@ -45,7 +53,6 @@ ffi.cdef[[
     BIO *BIO_new_mem_buf(const void *buf, int len);
     long BIO_ctrl(BIO *bp, int cmd, long larg, void *parg);
     int BIO_free(BIO *a);
-    int i2d_X509_REQ_bio(BIO *bp, X509_REQ *req);
     int i2d_X509_bio(BIO *bp, X509 *x509);
     int i2d_PrivateKey_bio(BIO *bp, const EVP_PKEY *pkey);
     const BIO_METHOD *BIO_s_mem(void);
@@ -80,8 +87,8 @@ ffi.cdef[[
     ASN1_TIME *X509_getm_notBefore(const X509 *x);
     ASN1_TIME *X509_getm_notAfter(const X509 *x);
     ASN1_TIME *X509_gmtime_adj(ASN1_TIME *asn1_time, long offset_sec);
-    ASN1_TIME *ASN1_TIME_set(ASN1_TIME *s, time_t t);
-
+    ASN1_TIME *X509_time_adj_ex(ASN1_TIME *asn1_time, int offset_day, long
+                                    offset_sec, time_t *in_tm);
     X509_NAME *X509_REQ_get_subject_name(const X509_REQ *req);
     int X509_NAME_get_index_by_NID(const X509_NAME *name, int nid, int lastpos);
     X509_NAME_ENTRY *X509_NAME_delete_entry(X509_NAME *name, int loc);
@@ -91,6 +98,16 @@ ffi.cdef[[
     int X509_set_pubkey(X509 *x, EVP_PKEY *pkey);
     const EVP_MD *EVP_sha256(void);
     int X509_sign(X509 *x, EVP_PKEY *pkey, const EVP_MD *md);
+
+    ASN1_IA5STRING *ASN1_IA5STRING_new();
+    void ASN1_STRING_free(ASN1_STRING *a);
+    int ASN1_STRING_set(ASN1_STRING *str, const void *data, int len);
+    GENERAL_NAME* GENERAL_NAME_new(void);
+    void GENERAL_NAME_free(GENERAL_NAME* a);
+    void GENERAL_NAME_set0_value(GENERAL_NAME *a, int type, void *value);
+    OPENSSL_STACK* OPENSSL_sk_new_null(void);
+    void OPENSSL_sk_push(OPENSSL_STACK* st, const void* val);
+    int X509_add1_ext_i2d(X509* x, int nid, OPENSSL_STACK* value, int crit, unsigned long flags);
 ]]
 
 
@@ -173,7 +190,7 @@ local function wrap_to_x(tox, ...)
 
     local r = tox(bio, ...)
     if r ~= 1 then
-        return nil, err_fmt("i2d_X509_bio return " .. r)
+        return nil, err_fmt("tox return " .. r)
     end
 
     local buf = ffi_new("char *[1]")
@@ -229,7 +246,57 @@ local function set_serial_number(crt)
 end
 
 
-function _M.gen_signed_cert(csr, ca_key, ca_crt, cn)
+local function gn_set_dns_val(gn, val)
+    gn.type = 2
+
+end
+
+local function set_alt_names(crt, names)
+    if names == nil or type(names) ~= "table" then
+        return false, "invalid names"
+    end
+
+    local alt_name_stack = C.OPENSSL_sk_new_null()
+    if alt_name_stack == nil then
+        return false, err_fmt("OPENSSL_sk_new_null return nil")
+    end
+    -- local name_free = function(st)
+    --     C.OPENSSL_sk_pop_free(st, C.GENERAL_NAME_free)
+    -- end
+    -- ffi_gc(alt_name_stack, name_free)
+
+    for _, name in ipairs(names) do
+        local san = C.GENERAL_NAME_new()
+        if san == nil then
+            goto continue
+        end
+        ffi_gc(san, C.GENERAL_NAME_free)
+
+        local ia5 = C.ASN1_IA5STRING_new()
+        if ia5 == nil then
+            goto continue
+        end
+
+        if C.ASN1_STRING_set(ia5, name, #name) ~= 1 then
+            C.ASN1_STRING_free(ia5)
+            goto continue
+        end
+
+        C.GENERAL_NAME_set0_value(san, 2, ia5)
+        C.OPENSSL_sk_push(alt_name_stack, san)
+::continue::
+    end
+
+    local res = C.X509_add1_ext_i2d(crt, NID_subject_alt_name, alt_name_stack, 0, 0x2)
+    if res ~= 1 then
+        return false, err_fmt("X509_add1_ext_i2d return error")
+    end
+
+    return true
+end
+
+
+function _M.gen_signed_cert(csr, ca_key, ca_crt, exts)
     local crt = C.X509_new()
     if crt == nil then
         return nil, err_fmt("X509_new return nil")
@@ -243,23 +310,44 @@ function _M.gen_signed_cert(csr, ca_key, ca_crt, cn)
         return nil, err_fmt("X509_set_issuer_name error")
     end
 
-    C.X509_gmtime_adj(C.X509_getm_notBefore(crt), 0);
-    C.X509_gmtime_adj(C.X509_getm_notAfter(crt), 30*24*3600);
+    -- C.X509_gmtime_adj(C.X509_getm_notBefore(crt), 0);
+    -- C.X509_gmtime_adj(C.X509_getm_notAfter(crt), 30*24*3600);
+    local before = exts["notBefore"] or os.time()
+    local after = exts["notAfter"] or before + 30*24*3600
+    C.X509_time_adj_ex(C.X509_getm_notBefore(crt), 0, 0, ffi_new("time_t[1]", before))
+    C.X509_time_adj_ex(C.X509_getm_notAfter(crt), 0, 0, ffi_new("time_t[1]", after))
 
     local name = C.X509_REQ_get_subject_name(csr);
     if name == nil then
         return nil, err_fmt("X509_REQ_get_subject_name return nil")
     end
 
+    local cn = exts["commonName"] or ""
     local cn_index = C.X509_NAME_get_index_by_NID(name, NID_commonName, -1);
     if cn_index >= 0 then
         C.X509_NAME_delete_entry(name, cn_index);
     end
     C.X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, cn, -1, -1, 0)
 
+    local c = exts["countryName"] or ""
+    local c_index = C.X509_NAME_get_index_by_NID(name, NID_countryName, -1);
+    if c_index >= 0 then
+        C.X509_NAME_delete_entry(name, c_index);
+    end
+    C.X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, c, -1, -1, 0)
+
+    local st = exts["stateOrProvinceName"] or ""
+    local st_index = C.X509_NAME_get_index_by_NID(name, NID_stateOrProvinceName, -1);
+    if st_index >= 0 then
+        C.X509_NAME_delete_entry(name, st_index);
+    end
+    C.X509_NAME_add_entry_by_txt(name, "ST", MBSTRING_ASC, st, -1, -1, 0)
+
     if C.X509_set_subject_name(crt, name) == 0 then
         return nil, err_fmt("X509_set_subject_name return error")
     end
+
+    set_alt_names(crt, exts["altnames"])
 
     local pub = C.X509_REQ_get_pubkey(csr)
     if pub == nil then
