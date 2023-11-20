@@ -322,21 +322,21 @@ function _M.gen_signed_cert(csr, ca_key, ca_crt, exts)
         return nil, err_fmt("X509_REQ_get_subject_name return nil")
     end
 
-    local cn = exts["commonName"] or ""
+    local cn = exts["commonName"] or exts["CN"] or ""
     local cn_index = C.X509_NAME_get_index_by_NID(name, NID_commonName, -1);
     if cn_index >= 0 then
         C.X509_NAME_delete_entry(name, cn_index);
     end
     C.X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, cn, -1, -1, 0)
 
-    local c = exts["countryName"] or ""
+    local c = exts["countryName"] or exts["C"] or ""
     local c_index = C.X509_NAME_get_index_by_NID(name, NID_countryName, -1);
     if c_index >= 0 then
         C.X509_NAME_delete_entry(name, c_index);
     end
     C.X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, c, -1, -1, 0)
 
-    local st = exts["stateOrProvinceName"] or ""
+    local st = exts["stateOrProvinceName"] or exts["ST"] or ""
     local st_index = C.X509_NAME_get_index_by_NID(name, NID_stateOrProvinceName, -1);
     if st_index >= 0 then
         C.X509_NAME_delete_entry(name, st_index);
