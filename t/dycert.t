@@ -4,6 +4,7 @@ use Cwd qw(cwd);
 log_level('debug');
 
 $ENV{TEST_NGINX_HTML_DIR} ||= html_dir();
+my $use_luacov = $ENV{'TEST_NGINX_USE_LUACOV'} // '';
 
 no_long_string();
 
@@ -18,8 +19,10 @@ __DATA__
     variables_hash_max_size 2048;
 
     init_by_lua_block {
-        require 'luacov.tick'
-        jit.off()
+        if "1" == "$use_luacov" then
+            require 'luacov.tick'
+            jit.off()
+        end
         dycert = require("resty.dycert").new("t/cert/ca.key", "t/cert/ca.crt", "t/cert/test.key", "t/cert/test.csr")
         local err = dycert:init()
         if err ~= nil then
@@ -123,7 +126,7 @@ __DATA__
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 sent http request: 56 bytes.
 received: HTTP/1.1 201 Created
 received: Server: openresty
@@ -148,8 +151,10 @@ lua ssl server name: "test.com"
     variables_hash_max_size 2048;
 
     init_by_lua_block {
-        require 'luacov.tick'
-        jit.off()
+        if "1" == "$use_luacov" then
+            require 'luacov.tick'
+            jit.off()
+        end
         dycert = require("resty.dycert").new("t/cert/ca.key", "t/cert/ca.crt", "t/cert/test.key", "t/cert/test.csr")
         local err = dycert:init()
         if err ~= nil then
@@ -256,7 +261,7 @@ lua ssl server name: "test.com"
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 sent http request: 58 bytes.
 received: HTTP/1.1 201 Created
 received: Server: openresty

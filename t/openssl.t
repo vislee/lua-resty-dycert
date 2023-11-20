@@ -3,13 +3,17 @@ use Cwd qw(cwd);
 
 log_level('debug');
 
+my $use_luacov = $ENV{'TEST_NGINX_USE_LUACOV'} // '';
+
 my $pwd = cwd();
 our $HttpConfig = qq{
     lua_package_path "$pwd/lib/?.lua;$pwd/lib/?/init.lua;;";
     variables_hash_max_size 2048;
     init_by_lua_block {
-        require 'luacov.tick'
-        jit.off()
+        if "1" == "$use_luacov" then
+            require 'luacov.tick'
+            jit.off()
+        end
     }
 };
 
