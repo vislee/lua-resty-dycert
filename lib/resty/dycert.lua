@@ -10,39 +10,34 @@ local _M = {}
 local mt = { __index = _M }
 
 
-function _M.new(ca_key_path, ca_crt_path, key_path, csr_path)
-    return setmetatable({
-        ca_key_path = ca_key_path,
-        ca_crt_path = ca_crt_path,
-        key_path = key_path,
-        csr_path = csr_path
-    }, mt)
+function _M.new()
+    return setmetatable({}, mt)
 end
 
 
-function _M.init(self)
-    local ca_key_fd, err = open(self.ca_key_path, "r")
+function _M.init(self, ca_key_path, ca_crt_path, key_path, csr_path)
+    local ca_key_fd, err = open(ca_key_path, "r")
     if err ~= nil then
         return err
     end
     local ca_key = ca_key_fd:read("*a")
     ca_key_fd:close()
 
-    local ca_crt_fd, err = open(self.ca_crt_path, "r")
+    local ca_crt_fd, err = open(ca_crt_path, "r")
     if err ~= nil then
         return err
     end
     local ca_crt = ca_crt_fd:read("*a")
     ca_crt_fd:close()
 
-    local key_fd, err = open(self.key_path, "r")
+    local key_fd, err = open(key_path, "r")
     if err ~= nil then
         return err
     end
     local key = key_fd:read("*a")
     key_fd:close()
 
-    local csr_fd, err = open(self.csr_path, "r")
+    local csr_fd, err = open(csr_path, "r")
     if err ~= nil then
         return err
     end

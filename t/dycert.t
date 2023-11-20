@@ -23,8 +23,8 @@ __DATA__
             require 'luacov.tick'
             jit.off()
         end
-        dycert = require("resty.dycert").new("t/cert/ca.key", "t/cert/ca.crt", "t/cert/test.key", "t/cert/test.csr")
-        local err = dycert:init()
+        dycert = require("resty.dycert").new()
+        local err = dycert:init("t/cert/ca.key", "t/cert/ca.crt", "t/cert/test.key", "t/cert/test.csr")
         if err ~= nil then
             ngx.log(ngx.ERR, "dycert init error ", err)
         end
@@ -155,8 +155,8 @@ lua ssl server name: "test.com"
             require 'luacov.tick'
             jit.off()
         end
-        dycert = require("resty.dycert").new("t/cert/ca.key", "t/cert/ca.crt", "t/cert/test.key", "t/cert/test.csr")
-        local err = dycert:init()
+        dycert = require("resty.dycert").new()
+        local err = dycert:init("t/cert/ca.key", "t/cert/ca.crt", "t/cert/test.key", "t/cert/test.csr")
         if err ~= nil then
             ngx.log(ngx.ERR, "dycert init error ", err)
         end

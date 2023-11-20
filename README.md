@@ -23,8 +23,8 @@ http {
     ...
 
     init_by_lua_block {
-        dycert = require("resty.dycert").new("ca.key", "ca.crt", "test.key", "test.csr")
-        dycert:init()
+        dycert = require("resty.dycert").new()
+        dycert:init("ca.key", "ca.crt", "test.key", "test.csr")
     }
 
     server {
@@ -71,16 +71,16 @@ Methods
 
 new
 ---
-`syntax: dycert = dycert.new(cakey, cacrt, tkey, tcsr)`
+`syntax: dycert = dycert.new()`
 
-Creates a dycert object by `cakey`, `cacrt`, `tkey`, `tcsr`.
+Creates a dycert object .
 
 
 init
 ----
-`syntax: err = dycert:init()`
+`syntax: err = dycert:init(cakey, cacrt, tkey, tcsr)`
 
-Load the certs. the failures, returns error.
+Load the certs: `cakey`, `cacrt`, `tkey`, `tcsr`. the failures, returns error.
 
 
 get_cert
