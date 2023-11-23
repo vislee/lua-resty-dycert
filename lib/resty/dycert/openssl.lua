@@ -17,6 +17,7 @@ local NID_countryName = 14
 local NID_localityName = 15
 local NID_stateOrProvinceName = 16
 local NID_organizationName = 17
+local MBSTRING_UTF8  = 0x1000
 local MBSTRING_ASC   = 0x1001
 local BIO_CTRL_RESET = 1
 local BIO_CTRL_INFO  = 3
@@ -345,28 +346,28 @@ function _M.gen_signed_cert(csr, ca_key, ca_crt, exts)
     if c_index >= 0 then
         C.X509_NAME_delete_entry(name, c_index);
     end
-    C.X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, c, -1, -1, 0)
+    C.X509_NAME_add_entry_by_txt(name, "C", MBSTRING_UTF8, c, -1, -1, 0)
 
     local l = exts["localityName"] or exts["L"] or ""
     local l_index = C.X509_NAME_get_index_by_NID(name, NID_localityName, -1);
     if l_index >= 0 then
         C.X509_NAME_delete_entry(name, l_index);
     end
-    C.X509_NAME_add_entry_by_txt(name, "L", MBSTRING_ASC, l, -1, -1, 0)
+    C.X509_NAME_add_entry_by_txt(name, "L", MBSTRING_UTF8, l, -1, -1, 0)
 
     local st = exts["stateOrProvinceName"] or exts["ST"] or ""
     local st_index = C.X509_NAME_get_index_by_NID(name, NID_stateOrProvinceName, -1);
     if st_index >= 0 then
         C.X509_NAME_delete_entry(name, st_index);
     end
-    C.X509_NAME_add_entry_by_txt(name, "ST", MBSTRING_ASC, st, -1, -1, 0)
+    C.X509_NAME_add_entry_by_txt(name, "ST", MBSTRING_UTF8, st, -1, -1, 0)
 
     local o = exts["organizationName"] or exts["O"] or ""
     local o_index = C.X509_NAME_get_index_by_NID(name, NID_organizationName, -1);
     if o_index >= 0 then
         C.X509_NAME_delete_entry(name, o_index);
     end
-    C.X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, o, -1, -1, 0)
+    C.X509_NAME_add_entry_by_txt(name, "O", MBSTRING_UTF8, o, -1, -1, 0)
 
     if C.X509_set_subject_name(crt, name) == 0 then
         return nil, err_fmt("X509_set_subject_name return error")
