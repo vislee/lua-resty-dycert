@@ -169,7 +169,7 @@ lua ssl server name: "test.com"
         ssl_certificate_by_lua_block {
             local ngx_ssl = require "ngx.ssl"
             local sni = ngx_ssl.server_name()
-            local pem, err = dycert:get_cert("PEM", {commonName = sni, countryName = "CN", stateOrProvinceName = "tianjin", notBefore = 1699498000, notAfter = 2000000000, altnames = {sni, "*.vislee.com", "vislee.com"}})
+            local pem, err = dycert:get_cert("PEM", {commonName = sni, countryName = "CN", stateOrProvinceName = "tianjin", notBefore = 1699498000, notAfter = 2000000000, serial = "5B75D3763202B79FD06423A740348BB88A9EB21F", altnames = {sni, "*.vislee.com", "vislee.com"}})
             if err ~= nil then
                 ngx.log(ngx.ERR, "failed to get cert: ", err)
                 return

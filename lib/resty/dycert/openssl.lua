@@ -12,8 +12,6 @@ local ffi_sizeof = ffi.sizeof
 local str_fmt = string.format
 local tab_concat = table.concat
 
-local c_uchar_type = ffi.typeof("unsigned char[?]")
-
 local NID_commonName = 13
 local NID_countryName = 14
 local NID_localityName = 15
@@ -78,6 +76,7 @@ ffi.cdef[[
     int X509_set_subject_name(X509 *x, X509_NAME *name);
 
     int RAND_bytes(unsigned char *buf, int num);
+    int BN_hex2bn(BIGNUM **a, const char *str);
     BIGNUM *BN_bin2bn(const unsigned char *s, int len, BIGNUM *ret);
     void BN_free(BIGNUM *a);
     ASN1_INTEGER *BN_to_ASN1_INTEGER(const BIGNUM *bn, ASN1_INTEGER *ai);
@@ -111,6 +110,10 @@ ffi.cdef[[
     void OPENSSL_sk_push(OPENSSL_STACK* st, const void* val);
     int X509_add1_ext_i2d(X509* x, int nid, OPENSSL_STACK* value, int crit, unsigned long flags);
 ]]
+
+
+local c_uchar_type = ffi.typeof("unsigned char[?]")
+local bn_ptrptr_ct = ffi.typeof('BIGNUM*[1]')
 
 
 local errbuf = ffi.new('char[256]')
@@ -221,19 +224,29 @@ function _M.pkey_to_der(pkey)
 end
 
 
-local function set_serial_number(crt)
-    local buf = c_uchar_type(20)
-    local res = C.RAND_bytes(buf, 20)
-    if res ~= 1 then
-        return nil, err_fmt(str_fmt("RAND_bytes return %d", res))
-    end
+local function set_serial_number(crt, hex)
+    local bn
+    if type(hex) == "string" and #hex > 1 then
+        local p = ffi_new(bn_ptrptr_ct)
+        if C.BN_hex2bn(p, hex) == 0 then
+            return nil, err_fmt("BN_hex2bn return error")
+        end
 
-    local ptr = ffi_cast("char*", buf)
-    ptr[0] = bit.band(ptr[0], 0x7f)
+        bn = p[0]
+    else
+        local buf = c_uchar_type(20)
+        local res = C.RAND_bytes(buf, 20)
+        if res ~= 1 then
+            return nil, err_fmt(str_fmt("RAND_bytes return %d", res))
+        end
 
-    local bn = C.BN_bin2bn(buf, 20, nil)
-    if bn == nil then
-        return nil, err_fmt("BN_bin2bn return nil")
+        local ptr = ffi_cast("char*", buf)
+        ptr[0] = bit.band(ptr[0], 0x7f)
+
+        bn = C.BN_bin2bn(buf, 20, nil)
+        if bn == nil then
+            return nil, err_fmt("BN_bin2bn return nil")
+        end
     end
     ffi_gc(bn, C.BN_free)
 
@@ -247,11 +260,6 @@ local function set_serial_number(crt)
     return true
 end
 
-
-local function gn_set_dns_val(gn, val)
-    gn.type = 2
-
-end
 
 local function set_alt_names(crt, names)
     if names == nil or type(names) ~= "table" then
@@ -307,7 +315,8 @@ function _M.gen_signed_cert(csr, ca_key, ca_crt, exts)
 
     C.X509_set_version(crt, 0x02)
 
-    set_serial_number(crt)
+    set_serial_number(crt, exts["serial"])
+
     if C.X509_set_issuer_name(crt, C.X509_get_subject_name(ca_crt)) == 0 then
         return nil, err_fmt("X509_set_issuer_name error")
     end

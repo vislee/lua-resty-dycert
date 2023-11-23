@@ -101,6 +101,8 @@ exts is table,
 
   - exts.notAfter: 
 
+  - exts.serial: 
+
 
 get_pkey
 --------
